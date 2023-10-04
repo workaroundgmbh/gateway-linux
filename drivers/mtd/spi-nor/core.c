@@ -2599,6 +2599,10 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 	wanted_size = 4096u;
 #endif
 
+#ifdef CONFIG_MTD_SPI_NOR_USE_32K_SECTORS
+	wanted_size = 32768u;
+#endif
+
 	if (spi_nor_has_uniform_erase(nor)) {
 		erase = spi_nor_select_uniform_erase(map, wanted_size);
 		if (!erase)
