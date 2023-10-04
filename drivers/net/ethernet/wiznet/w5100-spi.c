@@ -16,6 +16,7 @@
 #include <linux/netdevice.h>
 #include <linux/of_net.h>
 #include <linux/of_device.h>
+#include <linux/of_gpio.h>
 #include <linux/spi/spi.h>
 
 #include "w5100.h"
@@ -424,6 +425,7 @@ static int w5100_spi_probe(struct spi_device *spi)
 	const struct w5100_ops *ops;
 	kernel_ulong_t driver_data;
 	const void *mac = NULL;
+	int link_gpio;
 	u8 tmpmac[ETH_ALEN];
 	int priv_size;
 	int ret;
@@ -458,7 +460,9 @@ static int w5100_spi_probe(struct spi_device *spi)
 		return -EINVAL;
 	}
 
-	return w5100_probe(&spi->dev, ops, priv_size, mac, spi->irq, -EINVAL);
+	link_gpio = of_get_named_gpio(spi->dev.of_node, "link-gpio", 0);
+
+	return w5100_probe(&spi->dev, ops, priv_size, mac, spi->irq, link_gpio);
 }
 
 static void w5100_spi_remove(struct spi_device *spi)

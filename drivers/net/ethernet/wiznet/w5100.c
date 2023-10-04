@@ -139,6 +139,8 @@ MODULE_LICENSE("GPL");
 #define W5500_RX_MEM_START	0x30000
 #define W5500_RX_MEM_SIZE	0x04000
 
+#define W5500_LINK_GPIO_UP		(0)
+
 /*
  * Device driver private data structure
  */
@@ -730,7 +732,7 @@ static u32 w5100_get_link(struct net_device *ndev)
 	struct w5100_priv *priv = netdev_priv(ndev);
 
 	if (gpio_is_valid(priv->link_gpio))
-		return !!gpio_get_value(priv->link_gpio);
+		return gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP;
 
 	return 1;
 }
@@ -943,7 +945,7 @@ static irqreturn_t w5100_detect_link(int irq, void *ndev_instance)
 	struct w5100_priv *priv = netdev_priv(ndev);
 
 	if (netif_running(ndev)) {
-		if (gpio_get_value(priv->link_gpio) != 0) {
+		if (gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP) {
 			netif_info(priv, link, ndev, "link is up\n");
 			netif_carrier_on(ndev);
 		} else {
@@ -999,7 +1001,7 @@ static int w5100_open(struct net_device *ndev)
 	napi_enable(&priv->napi);
 	netif_start_queue(ndev);
 	if (!gpio_is_valid(priv->link_gpio) ||
-	    gpio_get_value(priv->link_gpio) != 0)
+	    gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP)
 		netif_carrier_on(ndev);
 	return 0;
 }
@@ -1257,8 +1259,9 @@ static int w5100_resume(struct device *dev)
 
 		netif_device_attach(ndev);
 		if (!gpio_is_valid(priv->link_gpio) ||
-		    gpio_get_value(priv->link_gpio) != 0)
+		    gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP) {
 			netif_carrier_on(ndev);
+		}
 	}
 	return 0;
 }
