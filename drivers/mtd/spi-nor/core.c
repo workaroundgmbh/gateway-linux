@@ -2496,6 +2496,16 @@ spi_nor_select_uniform_erase(struct spi_nor_erase_map *map)
 		}
 
 		/*
+		 * If the current erase size is the 32k one, stop here,
+		 * we have found the right uniform Sector Erase command.
+		 */
+		if (IS_ENABLED(CONFIG_MTD_SPI_NOR_USE_32K_SECTORS) &&
+		    tested_erase->size == SZ_32K) {
+			erase = tested_erase;
+			break;
+		}
+
+		/*
 		 * Otherwise, the current erase size is still a valid candidate.
 		 * Select the biggest valid candidate.
 		 */
