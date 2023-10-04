@@ -135,7 +135,7 @@ static struct portmaster {
 	struct gs_port	*port;
 } ports[MAX_U_SERIAL_PORTS];
 
-#define GS_CLOSE_TIMEOUT		15		/* seconds */
+#define GS_CLOSE_TIMEOUT		1		/* seconds */
 
 
 
