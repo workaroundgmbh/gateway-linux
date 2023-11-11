@@ -6669,7 +6669,9 @@ static void hci_le_remote_conn_param_req_evt(struct hci_dev *hdev, void *data,
 		goto unlock;
 	}
 
-	if (max > hcon->le_conn_max_interval) {
+	/* Accept any maximum latency and
+	   refuse any minimum latency less than 50ms */
+	if (min < 40) {
 		send_conn_param_neg_reply(hdev, handle,
 					  HCI_ERROR_INVALID_LL_PARAMS);
 		goto unlock;
