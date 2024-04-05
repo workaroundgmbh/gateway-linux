@@ -781,12 +781,12 @@ static void rp1_gpio_irq_handler(struct irq_desc *desc)
 
 	ints = readl(pc->gpio_base + bank->ints_offset);
 	for_each_set_bit(b, &ints, 32) {
-		struct rp1_pin_info *pin = rp1_get_pin(chip, b);
+		struct rp1_pin_info *pin = rp1_get_pin(chip, bank->min_gpio + b);
 
 		writel(RP1_GPIO_CTRL_IRQRESET,
 		       pin->gpio + RP1_SET_OFFSET + RP1_GPIO_CTRL);
 		generic_handle_irq(irq_linear_revmap(pc->gpio_chip.irq.domain,
-						     bank->gpio_offset + b));
+						     bank->min_gpio + b));
 	}
 
 	chained_irq_exit(host_chip, desc);
@@ -848,10 +848,13 @@ static int rp1_irq_set_type(struct rp1_pin_info *pin, unsigned int type)
 		return -EINVAL;
 	}
 
-	/* Clear them all */
+	/* Clear the event enables */
 	writel(RP1_INT_MASK << RP1_GPIO_EVENTS_SHIFT_RAW,
 	       pin->gpio + RP1_CLR_OFFSET + RP1_GPIO_CTRL);
-	/* Set those that are needed */
+	/* Clear any latched events */
+	writel(RP1_GPIO_CTRL_IRQRESET,
+		pin->gpio + RP1_SET_OFFSET + RP1_GPIO_CTRL);
+	/* Enable the events that are needed */
 	writel(irq_flags << RP1_GPIO_EVENTS_SHIFT_RAW,
 	       pin->gpio + RP1_SET_OFFSET + RP1_GPIO_CTRL);
 	pin->irq_type = type;
@@ -894,6 +897,29 @@ static void rp1_gpio_irq_ack(struct irq_data *data)
 	writel(RP1_GPIO_CTRL_IRQRESET, pin->gpio + RP1_SET_OFFSET + RP1_GPIO_CTRL);
 }
 
+static int rp1_gpio_irq_set_affinity(struct irq_data *data, const struct cpumask *dest, bool force)
+{
+	struct gpio_chip *chip = irq_data_get_irq_chip_data(data);
+	struct rp1_pinctrl *pc = gpiochip_get_data(chip);
+	const struct rp1_iobank_desc *bank;
+	struct irq_data *parent_data = NULL;
+	int i;
+
+	for (i = 0; i < 3; i++) {
+		bank = &rp1_iobanks[i];
+		if (data->hwirq >= bank->min_gpio &&
+		    data->hwirq < bank->min_gpio + bank->num_gpios) {
+			parent_data = irq_get_irq_data(pc->irq[i]);
+			break;
+		}
+	}
+
+	if (parent_data && parent_data->chip->irq_set_affinity)
+		return parent_data->chip->irq_set_affinity(parent_data, dest, force);
+
+	return -EINVAL;
+}
+
 static struct irq_chip rp1_gpio_irq_chip = {
 	.name = MODULE_NAME,
 	.irq_enable = rp1_gpio_irq_enable,
@@ -902,6 +928,7 @@ static struct irq_chip rp1_gpio_irq_chip = {
 	.irq_ack = rp1_gpio_irq_ack,
 	.irq_mask = rp1_gpio_irq_disable,
 	.irq_unmask = rp1_gpio_irq_enable,
+	.irq_set_affinity = rp1_gpio_irq_set_affinity,
 	.flags = IRQCHIP_IMMUTABLE,
 };
 
@@ -981,7 +1008,16 @@ static int rp1_pctl_legacy_map_func(struct rp1_pinctrl *pc,
 		return -EINVAL;
 	}
 
-	func = legacy_fsel_map[pin][fnum];
+	if (pin < ARRAY_SIZE(legacy_fsel_map)) {
+		func = legacy_fsel_map[pin][fnum];
+	} else if (fnum < 2) {
+		func = func_gpio;
+	} else {
+		dev_err(pc->dev, "%pOF: invalid brcm,pins value %d\n",
+			np, pin);
+		return -EINVAL;
+	}
+
 	if (func == func_invalid) {
 		dev_err(pc->dev, "%pOF: brcm,function %d not supported on pin %d\n",
 			np, fnum, pin);
@@ -1104,13 +1140,6 @@ static int rp1_pctl_dt_node_to_map(struct pinctrl_dev *pctldev,
 		err = of_property_read_u32_index(np, "brcm,pins", i, &pin);
 		if (err)
 			goto out;
-		if (pin >= ARRAY_SIZE(legacy_fsel_map)) {
-			dev_err(pc->dev, "%pOF: invalid brcm,pins value %d\n",
-				np, pin);
-			err = -EINVAL;
-			goto out;
-		}
-
 		if (num_funcs) {
 			err = of_property_read_u32_index(np, "brcm,function",
 							 (num_funcs > 1) ? i : 0,
