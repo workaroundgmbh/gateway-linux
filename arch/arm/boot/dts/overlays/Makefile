@@ -189,6 +189,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	pcf857x.dtbo \
 	pcie-32bit-dma.dtbo \
 	pcie-32bit-dma-pi5.dtbo \
+	pciex1-compat-pi5.dtbo \
 	pibell.dtbo \
 	pifacedigital.dtbo \
 	pifi-40.dtbo \
@@ -230,6 +231,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	rra-digidac1-wm8741-audio.dtbo \
 	sainsmart18.dtbo \
 	sc16is750-i2c.dtbo \
+	sc16is750-spi0.dtbo \
 	sc16is752-i2c.dtbo \
 	sc16is752-spi0.dtbo \
 	sc16is752-spi1.dtbo \
