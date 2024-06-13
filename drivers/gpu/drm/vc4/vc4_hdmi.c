@@ -2867,7 +2867,10 @@ static int vc4_hdmi_audio_init(struct vc4_hdmi *vc4_hdmi)
 	/* Before BCM2711, we don't have a named register range */
 	if (index < 0)
 		index = 1;
+
 	iomem = platform_get_resource(vc4_hdmi->pdev, IORESOURCE_MEM, index);
+	if (!iomem)
+		return -EINVAL;
 
 	vc4_hdmi->audio.dma_data.addr = iomem->start + mai_data->offset;
 	vc4_hdmi->audio.dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
