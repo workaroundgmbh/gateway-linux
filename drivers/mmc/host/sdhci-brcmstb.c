@@ -25,6 +25,7 @@
 #define BRCMSTB_MATCH_FLAGS_NO_64BIT		BIT(0)
 #define BRCMSTB_MATCH_FLAGS_BROKEN_TIMEOUT	BIT(1)
 #define BRCMSTB_MATCH_FLAGS_HAS_CLOCK_GATE	BIT(2)
+#define BRCMSTB_MATCH_FLAGS_USE_CARD_BUSY	BIT(4)
 
 #define BRCMSTB_PRIV_FLAGS_HAS_CQE		BIT(0)
 #define BRCMSTB_PRIV_FLAGS_GATE_CLOCK		BIT(1)
@@ -365,8 +366,21 @@ static void sdhci_brcmstb_cqe_enable(struct mmc_host *mmc)
 
 	sdhci_cqe_enable(mmc);
 
-	/* Reset CMD13 polling timer back to eMMC specification default */
-	cqhci_writel(cq_host, 0x00011000, CQHCI_SSC1);
+	/*
+	 * The controller resets this register to a very short default interval
+	 * whenever CQHCI is disabled.
+	 *
+	 * For removable cards CBC needs to be clear or card removal can hang
+	 * the CQE. In polling mode, a CIT of 0x4000 "cycles" seems to produce the best
+	 * throughput.
+	 *
+	 * For nonremovable cards, the specification default of CBC=1 CIT=0x1000
+	 * suffices.
+	 */
+	if (mmc->caps & MMC_CAP_NONREMOVABLE)
+		cqhci_writel(cq_host, 0x00011000, CQHCI_SSC1);
+	else
+		cqhci_writel(cq_host, 0x00004000, CQHCI_SSC1);
 }
 
 static const struct cqhci_host_ops sdhci_brcmstb_cqhci_ops = {
@@ -386,7 +400,7 @@ static struct sdhci_ops sdhci_brcmstb_ops_2712 = {
 	.set_clock = sdhci_bcm2712_set_clock,
 	.set_power = sdhci_brcmstb_set_power,
 	.set_bus_width = sdhci_set_bus_width,
-	.reset = sdhci_reset,
+	.reset = brcmstb_reset,
 	.set_uhs_signaling = sdhci_set_uhs_signaling,
 	.init_sd_express = bcm2712_init_sd_express,
 };
@@ -416,7 +430,6 @@ static const struct brcmstb_match_priv match_priv_7216 = {
 };
 
 static const struct brcmstb_match_priv match_priv_2712 = {
-	.flags = BRCMSTB_MATCH_FLAGS_HAS_CLOCK_GATE,
 	.hs400es = sdhci_brcmstb_hs400es,
 	.cfginit = sdhci_brcmstb_cfginit_2712,
 	.ops = &sdhci_brcmstb_ops_2712,
@@ -621,6 +634,9 @@ static int sdhci_brcmstb_probe(struct platform_device *pdev)
 
 	if (match_priv->flags & BRCMSTB_MATCH_FLAGS_BROKEN_TIMEOUT)
 		host->quirks |= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL;
+
+	if (!(match_priv->flags & BRCMSTB_MATCH_FLAGS_USE_CARD_BUSY))
+		host->mmc_host_ops.card_busy = NULL;
 
 	/* Change the base clock frequency if the DT property exists */
 	if (device_property_read_u32(&pdev->dev, "clock-frequency",
