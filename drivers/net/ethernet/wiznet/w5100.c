@@ -727,16 +727,6 @@ static void w5100_get_drvinfo(struct net_device *ndev,
 		sizeof(info->bus_info));
 }
 
-static u32 w5100_get_link(struct net_device *ndev)
-{
-	struct w5100_priv *priv = netdev_priv(ndev);
-
-	if (gpio_is_valid(priv->link_gpio))
-		return gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP;
-
-	return 1;
-}
-
 static u32 w5100_get_msglevel(struct net_device *ndev)
 {
 	struct w5100_priv *priv = netdev_priv(ndev);
@@ -1000,9 +990,15 @@ static int w5100_open(struct net_device *ndev)
 	w5100_hw_start(priv);
 	napi_enable(&priv->napi);
 	netif_start_queue(ndev);
-	if (!gpio_is_valid(priv->link_gpio) ||
-	    gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP)
-		netif_carrier_on(ndev);
+	if (gpio_is_valid(priv->link_gpio)) {
+	    if (gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP) {
+			netif_carrier_on(ndev);
+		} else {
+			netif_carrier_off(ndev);
+		}
+	} else {
+		netif_carrier_off(ndev);
+	}
 	return 0;
 }
 
@@ -1022,7 +1018,7 @@ static const struct ethtool_ops w5100_ethtool_ops = {
 	.get_drvinfo		= w5100_get_drvinfo,
 	.get_msglevel		= w5100_get_msglevel,
 	.set_msglevel		= w5100_set_msglevel,
-	.get_link		= w5100_get_link,
+	.get_link		= ethtool_op_get_link,
 	.get_regs_len		= w5100_get_regs_len,
 	.get_regs		= w5100_get_regs,
 };
@@ -1258,9 +1254,14 @@ static int w5100_resume(struct device *dev)
 		w5100_hw_start(priv);
 
 		netif_device_attach(ndev);
-		if (!gpio_is_valid(priv->link_gpio) ||
-		    gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP) {
-			netif_carrier_on(ndev);
+		if (gpio_is_valid(priv->link_gpio)) {
+			if (gpio_get_value(priv->link_gpio) == W5500_LINK_GPIO_UP) {
+				netif_carrier_on(ndev);
+			} else {
+				netif_carrier_off(ndev);
+			}
+		} else {
+			netif_carrier_off(ndev);
 		}
 	}
 	return 0;
