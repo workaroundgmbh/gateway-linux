@@ -47,7 +47,7 @@
 /* V_TIMING internal */
 #define IMX500_REG_FRAME_LENGTH CCI_REG16(0x0340)
 #define IMX500_FRAME_LENGTH_MAX 0xffdc
-#define IMX500_VBLANK_MIN 4
+#define IMX500_VBLANK_MIN 1117
 
 /* H_TIMING internal */
 #define IMX500_REG_LINE_LENGTH CCI_REG16(0x0342)
@@ -273,9 +273,6 @@ struct imx500_mode {
 
 	/* Analog crop rectangle. */
 	struct v4l2_rect crop;
-
-	/* Default framerate. */
-	unsigned int framerate_default;
 
 	/* Default register values */
 	struct imx500_reg_list reg_list;
@@ -905,7 +902,6 @@ static const struct imx500_mode imx500_supported_modes[] = {
 			.width = 4056,
 			.height = 3040,
 		},
-		.framerate_default = 10,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_4056x3040_regs),
 			.regs = mode_4056x3040_regs,
@@ -922,7 +918,6 @@ static const struct imx500_mode imx500_supported_modes[] = {
 			.width = 4056,
 			.height = 3040,
 		},
-		.framerate_default = 40,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_2028x1520_regs),
 			.regs = mode_2028x1520_regs,
@@ -1744,40 +1739,22 @@ static int imx500_get_pad_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static unsigned int imx500_get_frame_length(const struct imx500_mode *mode,
-					    unsigned int framerate_default)
-{
-	u64 frame_length;
-
-	frame_length = IMX500_PIXEL_RATE;
-	do_div(frame_length, (u64)framerate_default * mode->line_length_pix);
-
-	if (WARN_ON(frame_length > IMX500_FRAME_LENGTH_MAX))
-		frame_length = IMX500_FRAME_LENGTH_MAX;
-
-	return max_t(unsigned int, frame_length, mode->height);
-}
-
 static void imx500_set_framing_limits(struct imx500 *imx500)
 {
-	unsigned int frm_length_default, hblank_min;
+	unsigned int hblank_min;
 	const struct imx500_mode *mode = imx500->mode;
-
-	frm_length_default =
-		imx500_get_frame_length(mode, mode->framerate_default);
 
 	/* Default to no long exposure multiplier. */
 	imx500->long_exp_shift = 0;
 
 	/* Update limits and set FPS to default */
 	__v4l2_ctrl_modify_range(
-		imx500->vblank, 1,
+		imx500->vblank, IMX500_VBLANK_MIN,
 		((1 << IMX500_LONG_EXP_SHIFT_MAX) * IMX500_FRAME_LENGTH_MAX) -
-			mode->height,
-		IMX500_VBLANK_MIN, frm_length_default - mode->height);
+			mode->height, 1, IMX500_VBLANK_MIN);
 
 	/* Setting this will adjust the exposure limits as well. */
-	__v4l2_ctrl_s_ctrl(imx500->vblank, frm_length_default - mode->height);
+	__v4l2_ctrl_s_ctrl(imx500->vblank, IMX500_VBLANK_MIN);
 
 	hblank_min = mode->line_length_pix - mode->width;
 	__v4l2_ctrl_modify_range(imx500->hblank, hblank_min, hblank_min, 1,
@@ -2499,7 +2476,8 @@ static int imx500_init_controls(struct imx500 *imx500)
 	 * in the imx500_set_framing_limits() call below.
 	 */
 	imx500->vblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx500_ctrl_ops,
-					   V4L2_CID_VBLANK, 0, 0xffff, 1, 0);
+					   V4L2_CID_VBLANK, IMX500_VBLANK_MIN,
+					   0xffff, 1, IMX500_VBLANK_MIN);
 	imx500->hblank = v4l2_ctrl_new_std(ctrl_hdlr, &imx500_ctrl_ops,
 					   V4L2_CID_HBLANK, 0, 0xffff, 1, 0);
 
