@@ -20,7 +20,7 @@
 #endif
 
 #define bad_params_if(client, test) \
-	({ bool f = (test); if (f) pio_set_error(client, -EINVAL); \
+	({ bool f = (test); if (f && client) pio_set_error(client, -EINVAL); \
 		if (f && PARAM_WARNINGS_ENABLED) WARN_ON((test)); \
 		f; })
 
@@ -176,7 +176,7 @@ typedef rp1_pio_sm_config pio_sm_config;
 typedef struct rp1_pio_client *PIO;
 
 void pio_set_error(struct rp1_pio_client *client, int err);
-int pio_get_error(struct rp1_pio_client *client);
+int pio_get_error(const struct rp1_pio_client *client);
 void pio_clear_error(struct rp1_pio_client *client);
 
 int rp1_pio_can_add_program(struct rp1_pio_client *client, void *param);
@@ -200,6 +200,8 @@ int rp1_pio_sm_enable_sync(struct rp1_pio_client *client, void *param);
 int rp1_pio_sm_put(struct rp1_pio_client *client, void *param);
 int rp1_pio_sm_get(struct rp1_pio_client *client, void *param);
 int rp1_pio_sm_set_dmactrl(struct rp1_pio_client *client, void *param);
+int rp1_pio_sm_fifo_state(struct rp1_pio_client *client, void *param);
+int rp1_pio_sm_drain_tx(struct rp1_pio_client *client, void *param);
 int rp1_pio_gpio_init(struct rp1_pio_client *client, void *param);
 int rp1_pio_gpio_set_function(struct rp1_pio_client *client, void *param);
 int rp1_pio_gpio_set_pulls(struct rp1_pio_client *client, void *param);
@@ -245,7 +247,7 @@ static inline bool pio_can_add_program_at_offset(struct rp1_pio_client *client,
 	return !rp1_pio_can_add_program(client, &args);
 }
 
-uint pio_add_program(struct rp1_pio_client *client, const pio_program_t *program)
+static inline uint pio_add_program(struct rp1_pio_client *client, const pio_program_t *program)
 {
 	struct rp1_pio_add_program_args args;
 	int offset;
@@ -318,7 +320,7 @@ static inline int pio_sm_unclaim(struct rp1_pio_client *client, uint sm)
 	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
 		return -EINVAL;
 
-	return rp1_pio_sm_claim(client, &args);
+	return rp1_pio_sm_unclaim(client, &args);
 }
 
 static inline int pio_claim_unused_sm(struct rp1_pio_client *client, bool required)
@@ -365,7 +367,7 @@ static inline int pio_sm_set_config(struct rp1_pio_client *client, uint sm,
 	return rp1_pio_sm_set_config(client, &args);
 }
 
-int pio_sm_exec(struct rp1_pio_client *client, uint sm, uint instr)
+static inline int pio_sm_exec(struct rp1_pio_client *client, uint sm, uint instr)
 {
 	struct rp1_pio_sm_exec_args args = { .sm = sm, .instr = instr, .blocking = false };
 
@@ -375,7 +377,7 @@ int pio_sm_exec(struct rp1_pio_client *client, uint sm, uint instr)
 	return rp1_pio_sm_exec(client, &args);
 }
 
-int pio_sm_exec_wait_blocking(struct rp1_pio_client *client, uint sm, uint instr)
+static inline int pio_sm_exec_wait_blocking(struct rp1_pio_client *client, uint sm, uint instr)
 {
 	struct rp1_pio_sm_exec_args args = { .sm = sm, .instr = instr, .blocking = true };
 
@@ -551,6 +553,15 @@ static inline int pio_sm_set_dmactrl(struct rp1_pio_client *client, uint sm, boo
 	return rp1_pio_sm_set_dmactrl(client, &args);
 };
 
+static inline int pio_sm_drain_tx_fifo(struct rp1_pio_client *client, uint sm)
+{
+	struct rp1_pio_sm_clear_fifos_args args = { .sm = sm };
+
+	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
+		return -EINVAL;
+	return rp1_pio_sm_drain_tx(client, &args);
+};
+
 static inline int pio_sm_put(struct rp1_pio_client *client, uint sm, uint32_t data)
 {
 	struct rp1_pio_sm_put_args args = { .sm = (uint16_t)sm, .blocking = false, .data = data };
@@ -586,6 +597,84 @@ static inline uint32_t pio_sm_get_blocking(struct rp1_pio_client *client, uint s
 		rp1_pio_sm_get(client, &args);
 	return args.data;
 }
+
+static inline int pio_sm_is_rx_fifo_empty(struct rp1_pio_client *client, uint sm)
+{
+	struct rp1_pio_sm_fifo_state_args args = { .sm = sm, .tx = false };
+	int ret;
+
+	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
+		return -EINVAL;
+	ret = rp1_pio_sm_fifo_state(client, &args);
+	if (ret == sizeof(args))
+		ret = args.empty;
+	return ret;
+};
+
+static inline int pio_sm_is_rx_fifo_full(struct rp1_pio_client *client, uint sm)
+{
+	struct rp1_pio_sm_fifo_state_args args = { .sm = sm, .tx = false };
+	int ret;
+
+	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
+		return -EINVAL;
+	ret = rp1_pio_sm_fifo_state(client, &args);
+	if (ret == sizeof(args))
+		ret = args.full;
+	return ret;
+};
+
+static inline int pio_sm_rx_fifo_level(struct rp1_pio_client *client, uint sm)
+{
+	struct rp1_pio_sm_fifo_state_args args = { .sm = sm, .tx = false };
+	int ret;
+
+	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
+		return -EINVAL;
+	ret = rp1_pio_sm_fifo_state(client, &args);
+	if (ret == sizeof(args))
+		ret = args.level;
+	return ret;
+};
+
+static inline int pio_sm_is_tx_fifo_empty(struct rp1_pio_client *client, uint sm)
+{
+	struct rp1_pio_sm_fifo_state_args args = { .sm = sm, .tx = true };
+	int ret;
+
+	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
+		return -EINVAL;
+	ret = rp1_pio_sm_fifo_state(client, &args);
+	if (ret == sizeof(args))
+		ret = args.empty;
+	return ret;
+};
+
+static inline int pio_sm_is_tx_fifo_full(struct rp1_pio_client *client, uint sm)
+{
+	struct rp1_pio_sm_fifo_state_args args = { .sm = sm, .tx = true };
+	int ret;
+
+	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
+		return -EINVAL;
+	ret = rp1_pio_sm_fifo_state(client, &args);
+	if (ret == sizeof(args))
+		ret = args.full;
+	return ret;
+};
+
+static inline int pio_sm_tx_fifo_level(struct rp1_pio_client *client, uint sm)
+{
+	struct rp1_pio_sm_fifo_state_args args = { .sm = sm, .tx = true };
+	int ret;
+
+	if (bad_params_if(client, sm >= NUM_PIO_STATE_MACHINES))
+		return -EINVAL;
+	ret = rp1_pio_sm_fifo_state(client, &args);
+	if (ret == sizeof(args))
+		ret = args.level;
+	return ret;
+};
 
 static inline void sm_config_set_out_pins(pio_sm_config *c, uint out_base, uint out_count)
 {
