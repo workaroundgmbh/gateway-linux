@@ -1840,8 +1840,13 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			} else {
 				if (gadget->lpm_capable || cdev->use_webusb)
 					cdev->desc.bcdUSB = cpu_to_le16(0x0201);
-				else
-					cdev->desc.bcdUSB = cpu_to_le16(0x0200);
+				else {
+					if (gadget->speed <= USB_SPEED_FULL) {
+						cdev->desc.bcdUSB = cpu_to_le16(0x0110);
+					} else {
+						cdev->desc.bcdUSB = cpu_to_le16(0x0200);
+					}
+				}
 			}
 
 			value = min(w_length, (u16) sizeof cdev->desc);
