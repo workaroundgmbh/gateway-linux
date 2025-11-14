@@ -84,4 +84,11 @@ config WIZNET_W5100_SPI
 	  To compile this driver as a module, choose M here: the module
 	  will be called w5100-spi.
 
+config WIZNET_W5100_VLAN
+	bool "WIZnet W5100/W5200/W5500 Ethernet support VLAN"
+	depends on WIZNET_W5100
+	default n
+	help
+	  Enable Ethernet virtual local area network (VLAN).
+
 endif # NET_VENDOR_WIZNET
