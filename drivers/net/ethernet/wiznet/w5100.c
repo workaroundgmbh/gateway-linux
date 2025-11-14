@@ -13,6 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/platform_data/wiznet.h>
 #include <linux/ethtool.h>
+#include <linux/if_vlan.h>
 #include <linux/skbuff.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -1131,10 +1132,15 @@ int w5100_probe(struct device *dev, const struct w5100_ops *ops,
 	ndev->ethtool_ops = &w5100_ethtool_ops;
 	netif_napi_add_weight(ndev, &priv->napi, w5100_napi_poll, 16);
 
+#ifdef CONFIG_WIZNET_W5100_VLAN
+	ndev->max_mtu -= VLAN_HLEN;
+	ndev->mtu = ndev->max_mtu;
+#else
 	/* This chip doesn't support VLAN packets with normal MTU,
 	 * so disable VLAN for this device.
 	 */
 	ndev->features |= NETIF_F_VLAN_CHALLENGED;
+#endif /* CONFIG_WIZNET_W5100_VLAN */
 
 	err = register_netdev(ndev);
 	if (err < 0)
