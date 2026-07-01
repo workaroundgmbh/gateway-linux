@@ -1,0 +1,49 @@
+name: Weekly upstream merge
+
+# Opens a pull request once a week to merge the changes from the Raspberry Pi
+# upstream branch (raspberrypi/linux `rpi-6.18.y`) into our main branch
+# (`proglove-rpi-6.18.y`).
+
+on:
+  schedule:
+    # Every Monday at 04:00 UTC.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM_URL: https://github.com/raspberrypi/linux.git
+  BASE_BRANCH: proglove-rpi-6.18.y
+  UPSTREAM_BRANCH: rpi-6.18.y
+  SYNC_BRANCH: automated/upstream-merge
+
+jobs:
+  open-merge-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_BRANCH }}
+          fetch-depth: 0
+
+      - name: Push sync branch from upstream tip
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
+          git branch -f "$SYNC_BRANCH" upstream/"$UPSTREAM_BRANCH"
+          git push --force origin "$SYNC_BRANCH"
+
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$SYNC_BRANCH" \
+            --title "Weekly upstream merge: ${UPSTREAM_BRANCH} → ${BASE_BRANCH}" \
+            --body "Merge upstream \`${UPSTREAM_BRANCH}\` from raspberrypi/linux into \`${BASE_BRANCH}\`. Review the changes, resolve any conflicts, and merge." \
+            || echo "A pull request already exists for $SYNC_BRANCH."
