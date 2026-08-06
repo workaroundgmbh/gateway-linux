@@ -60,8 +60,10 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	dpi18cpadhi.dtbo \
 	dpi24.dtbo \
 	draws.dtbo \
+	draws-pi5.dtbo \
 	dwc-otg-deprecated.dtbo \
 	dwc2.dtbo \
+	ed-ipc.dtbo \
 	edt-ft5406.dtbo \
 	enc28j60.dtbo \
 	enc28j60-spi2.dtbo \
@@ -107,6 +109,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	hifiberry-digi-pro.dtbo \
 	hifiberry-studio-dac8x.dtbo \
 	hifiberry-studio-dac8x-pro.dtbo \
+	hifiberry-studio-digi.dtbo \
 	highperi.dtbo \
 	hy28a.dtbo \
 	hy28b.dtbo \
@@ -142,6 +145,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	imx296.dtbo \
 	imx327.dtbo \
 	imx335.dtbo \
+	imx355.dtbo \
 	imx378.dtbo \
 	imx415.dtbo \
 	imx462.dtbo \
@@ -241,8 +245,10 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	qca7000-uart0.dtbo \
 	ramoops.dtbo \
 	ramoops-pi4.dtbo \
+	ramoops-pi5.dtbo \
 	rootmaster.dtbo \
 	rotary-encoder.dtbo \
+	rp1-pio-uart.dtbo \
 	rpi-backlight.dtbo \
 	rpi-codeczero.dtbo \
 	rpi-dacplus.dtbo \
