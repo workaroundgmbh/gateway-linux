@@ -95,6 +95,7 @@ struct dma_info {
 	struct dma_chan *chan;
 	size_t buf_size;
 	size_t buf_count;
+	bool cyclic;
 	unsigned int head_idx;
 	unsigned int tail_idx;
 	struct dma_buf_info bufs[DMA_BOUNCE_BUFFER_COUNT];
@@ -940,6 +941,8 @@ static void rp1_pio_sm_dma_callback(void *param)
 {
 	struct dma_info *dma = param;
 
+	if (dma->cyclic)
+		WRITE_ONCE(dma->head_idx, dma->head_idx + 1);
 	up(&dma->buf_sem);
 }
 
@@ -961,18 +964,26 @@ static void rp1_pio_sm_kernel_dma_callback(void *param)
 static void rp1_pio_sm_dma_free(struct device *dev, struct dma_info *dma)
 {
 	dmaengine_terminate_all(dma->chan);
-	while (dma->buf_count > 0) {
-		dma->buf_count--;
+	if (dma->cyclic) {
+		dma->buf_count = 0;
 		dma_free_coherent(dev, ROUND_UP(dma->buf_size, PAGE_SIZE),
-				  dma->bufs[dma->buf_count].buf,
-				  dma->bufs[dma->buf_count].dma_addr);
+				  dma->bufs[0].buf,
+				  dma->bufs[0].dma_addr);
+	} else {
+		while (dma->buf_count > 0) {
+			dma->buf_count--;
+			dma_free_coherent(dev, ROUND_UP(dma->buf_size, PAGE_SIZE),
+					  dma->bufs[dma->buf_count].buf,
+					  dma->bufs[dma->buf_count].dma_addr);
+		}
 	}
 	dma_release_channel(dma->chan);
 	dma->chan = NULL;
+	dma->cyclic = false;
 }
 
 static int rp1_pio_sm_config_xfer_internal(struct rp1_pio_client *client, uint sm, uint dir,
-					   uint buf_size, uint buf_count)
+					   uint buf_size, uint buf_count, uint flags)
 {
 	struct rp1_pio_sm_set_dmactrl_args set_dmactrl_args;
 	struct rp1_pio_device *pio = client->pio;
@@ -981,10 +992,13 @@ static int rp1_pio_sm_config_xfer_internal(struct rp1_pio_client *client, uint s
 	struct device *dev = &pdev->dev;
 	struct dma_slave_caps dma_caps;
 	struct dma_info *dma = NULL;
+	bool cyclic = flags & RP1_PIO_SM_CONFIG_XFER_FL_DMA_CYCLE;
+	bool prefer_light_dma = flags & BIT(0);
+	bool force_dma_type = flags & BIT(1);
 	bool reconfigure = false;
 	phys_addr_t fifo_addr;
 	uint32_t dma_mask;
-	char chan_name[4];
+	char chan_name[5];
 	int ret = 0;
 
 	if (sm >= RP1_PIO_SMS_COUNT || dir >= RP1_PIO_DIR_COUNT)
@@ -992,6 +1006,9 @@ static int rp1_pio_sm_config_xfer_internal(struct rp1_pio_client *client, uint s
 	if ((buf_count || buf_size) &&
 	    (!buf_size || (buf_size & 3) ||
 	     !buf_count || buf_count > DMA_BOUNCE_BUFFER_COUNT))
+		return -EINVAL;
+	/* Cyclic DMA is currently only supported for FROM_SM */
+	if (cyclic && dir == RP1_PIO_DIR_TO_SM)
 		return -EINVAL;
 
 	dma_mask = 1 << (sm * 2 + dir);
@@ -1012,9 +1029,6 @@ static int rp1_pio_sm_config_xfer_internal(struct rp1_pio_client *client, uint s
 	if (reconfigure)
 		rp1_pio_sm_dma_free(dev, dma);
 
-	dma->buf_size = buf_size;
-	/* Round up the allocations */
-	buf_size = ROUND_UP(buf_size, PAGE_SIZE);
 	sema_init(&dma->buf_sem, 0);
 
 	/* Allocate and configure a DMA channel */
@@ -1022,17 +1036,33 @@ static int rp1_pio_sm_config_xfer_internal(struct rp1_pio_client *client, uint s
 	chan_name[0] = (dir == RP1_PIO_DIR_TO_SM) ? 't' : 'r';
 	chan_name[1] = 'x';
 	chan_name[2] = '0' + sm;
-	chan_name[3] = '\0';
+	if (prefer_light_dma)
+		chan_name[3] = 'l';
+	else
+		chan_name[3] = '\0';
+	chan_name[4] = '\0';
 
+	dma->cyclic = false;
 	dma->chan = dma_request_chan(dev, chan_name);
 	if (IS_ERR(dma->chan)) {
 		ret = PTR_ERR(dma->chan);
 		goto err_unclaim;
 	}
+	dma_get_slave_caps(dma->chan, &dma_caps);
+	if (force_dma_type &&
+	    dma_caps.max_burst != (prefer_light_dma ? 4 : 8)) {
+		ret = -EBUSY;
+		goto err_dma_free;
+	}
 
-	/* Alloc and map bounce buffers */
-	for (dma->buf_count = 0; dma->buf_count < buf_count; dma->buf_count++) {
-		struct dma_buf_info *dbi = &dma->bufs[dma->buf_count];
+	if (cyclic) {
+		dma->buf_size = buf_size * buf_count;
+		dma->buf_count = buf_count;
+		/* Round up the allocations */
+		buf_size = ROUND_UP(dma->buf_size, PAGE_SIZE);
+
+		/* Alloc and map bounce buffer */
+		struct dma_buf_info *dbi = &dma->bufs[0];
 
 		dbi->buf = dma_alloc_coherent(dma->chan->device->dev, buf_size,
 					      &dbi->dma_addr, GFP_KERNEL);
@@ -1042,6 +1072,24 @@ static int rp1_pio_sm_config_xfer_internal(struct rp1_pio_client *client, uint s
 		}
 		sg_init_table(&dbi->sgl, 1);
 		sg_dma_address(&dbi->sgl) = dbi->dma_addr;
+	} else {
+		dma->buf_size = buf_size;
+		/* Round up the allocations */
+		buf_size = ROUND_UP(buf_size, PAGE_SIZE);
+
+		/* Alloc and map bounce buffers */
+		for (dma->buf_count = 0; dma->buf_count < buf_count; dma->buf_count++) {
+			struct dma_buf_info *dbi = &dma->bufs[dma->buf_count];
+
+			dbi->buf = dma_alloc_coherent(dma->chan->device->dev, buf_size,
+						      &dbi->dma_addr, GFP_KERNEL);
+			if (!dbi->buf) {
+				ret = -ENOMEM;
+				goto err_dma_free;
+			}
+			sg_init_table(&dbi->sgl, 1);
+			sg_dma_address(&dbi->sgl) = dbi->dma_addr;
+		}
 	}
 
 	dma->head_idx = 0;
@@ -1081,6 +1129,31 @@ static int rp1_pio_sm_config_xfer_internal(struct rp1_pio_client *client, uint s
 	if (ret)
 		goto err_dma_free;
 
+	if (cyclic) {
+		struct dma_buf_info *dbi = &dma->bufs[0];
+		struct dma_async_tx_descriptor *desc;
+
+		sg_dma_len(&dbi->sgl) = dma->buf_size;
+		desc = dmaengine_prep_dma_cyclic(dma->chan, dbi->dma_addr,
+						 dma->buf_size, dma->buf_size / dma->buf_count,
+					       DMA_DEV_TO_MEM,
+					       DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+		if (!desc) {
+			dev_err(dev, "DMA preparation failed\n");
+			goto err_dma_free;
+		}
+
+		desc->callback = rp1_pio_sm_dma_callback;
+		desc->callback_param = dma;
+
+		/* Submit the buffer - the callback will kick the semaphore */
+		ret = dmaengine_submit(desc);
+		if (ret < 0)
+			goto err_dma_free;
+
+		dma->cyclic = cyclic;
+		dma_async_issue_pending(dma->chan);
+	}
 	return 0;
 
 err_dma_free:
@@ -1100,7 +1173,8 @@ static int rp1_pio_sm_config_xfer_user(struct rp1_pio_client *client, void *para
 	struct rp1_pio_sm_config_xfer_args *args = param;
 
 	return rp1_pio_sm_config_xfer_internal(client, args->sm, args->dir,
-					       args->buf_size, args->buf_count);
+					       args->buf_size, args->buf_count,
+					       RP1_PIO_SM_CONFIG_XFER_FL_DMA_PREFER_HEAVY);
 }
 
 static int rp1_pio_sm_config_xfer32_user(struct rp1_pio_client *client, void *param)
@@ -1108,7 +1182,17 @@ static int rp1_pio_sm_config_xfer32_user(struct rp1_pio_client *client, void *pa
 	struct rp1_pio_sm_config_xfer32_args *args = param;
 
 	return rp1_pio_sm_config_xfer_internal(client, args->sm, args->dir,
-					       args->buf_size, args->buf_count);
+					       args->buf_size, args->buf_count,
+					       RP1_PIO_SM_CONFIG_XFER_FL_DMA_PREFER_HEAVY);
+}
+
+static int rp1_pio_sm_config_xfer_v2_user(struct rp1_pio_client *client, void *param)
+{
+	struct rp1_pio_sm_config_xfer_v2_args *args = param;
+
+	return rp1_pio_sm_config_xfer_internal(client, args->sm, args->dir,
+					       args->buf_size, args->buf_count,
+					       args->flags);
 }
 
 static int rp1_pio_sm_tx_user(struct rp1_pio_device *pio, struct dma_info *dma,
@@ -1221,6 +1305,35 @@ static int rp1_pio_sm_rx_user(struct rp1_pio_device *pio, struct dma_info *dma,
 	if (!bytes)
 		return -EINVAL;
 
+	if (dma->cyclic) {
+		size_t period = dma->buf_size / dma->buf_count;
+		struct dma_buf_info *dbi = &dma->bufs[0];
+
+		if (bytes > period)
+			return -EINVAL;
+
+		/*
+		 * The callback posts the semaphore once per period, so consume
+		 * exactly one 'period' worth of data per read.
+		 */
+		if (down_interruptible(&dma->buf_sem))
+			return -ERESTARTSYS;
+
+		/* The DMA has wrapped onto the period we were about to read. */
+		if (READ_ONCE(dma->head_idx) - dma->tail_idx > dma->buf_count)
+			return -EOVERFLOW;
+
+		/* Pair with the DMAC's writes into the period we are about to copy. */
+		dma_rmb();
+
+		if (copy_to_user(userbuf,
+				 dbi->buf + (dma->tail_idx % dma->buf_count) * period,
+				 bytes))
+			return -EFAULT;
+		dma->tail_idx++;
+		return 0;
+	}
+
 	if (!userbuf) {
 		if (dma->head_idx - dma->tail_idx == dma->buf_count)
 			return -EBUSY;
@@ -1302,7 +1415,8 @@ static int rp1_pio_sm_xfer_data_user(struct rp1_pio_client *client, void *param)
 int rp1_pio_sm_config_xfer(struct rp1_pio_client *client, uint sm, uint dir,
 			      uint buf_size, uint buf_count)
 {
-	return rp1_pio_sm_config_xfer_internal(client, sm, dir, buf_size, buf_count);
+	return rp1_pio_sm_config_xfer_internal(client, sm, dir, buf_size, buf_count,
+					       RP1_PIO_SM_CONFIG_XFER_FL_DMA_PREFER_HEAVY);
 }
 EXPORT_SYMBOL_GPL(rp1_pio_sm_config_xfer);
 
@@ -1400,6 +1514,7 @@ struct handler_info {
 	HANDLER(SM_XFER_DATA, sm_xfer_data_user),
 	HANDLER(SM_XFER_DATA32, sm_xfer_data32_user),
 	HANDLER(SM_CONFIG_XFER32, sm_config_xfer32_user),
+	HANDLER(SM_CONFIG_XFER_V2, sm_config_xfer_v2_user),
 
 	HANDLER(CAN_ADD_PROGRAM, can_add_program),
 	HANDLER(ADD_PROGRAM, add_program),
@@ -1512,6 +1627,17 @@ void rp1_pio_close(struct rp1_pio_client *client)
 	}
 	spin_unlock(&pio->lock);
 
+	if (client->claimed_sms) {
+		struct rp1_pio_sm_set_enabled_args se_args = {
+			.mask = client->claimed_sms, .enable = 0
+		};
+		struct rp1_pio_sm_claim_args uc_args = {
+			.mask = client->claimed_sms
+		};
+		rp1_pio_sm_set_enabled(client, &se_args);
+		rp1_pio_sm_unclaim(client, &uc_args);
+	}
+
 	claimed = client->claimed_dmas;
 
 	for (i = 0; claimed; i++) {
@@ -1528,18 +1654,6 @@ void rp1_pio_close(struct rp1_pio_client *client)
 	spin_lock(&pio->lock);
 	pio->claimed_dmas &= ~client->claimed_dmas;
 	spin_unlock(&pio->lock);
-
-	if (client->claimed_sms) {
-		struct rp1_pio_sm_set_enabled_args se_args = {
-			.mask = client->claimed_sms, .enable = 0
-		};
-		struct rp1_pio_sm_claim_args uc_args = {
-			.mask = client->claimed_sms
-		};
-
-		rp1_pio_sm_set_enabled(client, &se_args);
-		rp1_pio_sm_unclaim(client, &uc_args);
-	}
 
 	if (client->claimed_instrs)
 		rp1_pio_remove_instrs(pio, client->claimed_instrs);

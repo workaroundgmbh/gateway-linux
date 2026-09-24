@@ -654,7 +654,7 @@ static int vc4_hdmi_write_infoframe(struct drm_connector *connector,
 	if (!drm_dev_enter(drm, &idx))
 		return 0;
 
-	if (len > sizeof(buffer)) {
+	if (len > VC4_HDMI_PACKET_SIZE) {
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -679,6 +679,9 @@ static int vc4_hdmi_write_infoframe(struct drm_connector *connector,
 		       buffer[i + 2] << 16,
 		       base + packet_reg);
 		packet_reg += 4;
+
+		if (packet_reg >= packet_reg_next)
+			break;
 
 		writel(buffer[i + 3] << 0 |
 		       buffer[i + 4] << 8 |
@@ -2164,8 +2167,17 @@ static int vc4_hdmi_audio_cpu_dai_probe(struct snd_soc_dai *dai)
 	return 0;
 }
 
+static int vc4_hdmi_audio_cpu_dai_startup(struct snd_pcm_substream *substream,
+					  struct snd_soc_dai *dai)
+{
+	/* hdmi-codec has no channel allocation for odd channel counts */
+	return snd_pcm_hw_constraint_step(substream->runtime, 0,
+					  SNDRV_PCM_HW_PARAM_CHANNELS, 2);
+}
+
 static const struct snd_soc_dai_ops vc4_snd_dai_ops = {
 	.probe  = vc4_hdmi_audio_cpu_dai_probe,
+	.startup = vc4_hdmi_audio_cpu_dai_startup,
 };
 
 static struct snd_soc_dai_driver vc4_hdmi_audio_cpu_dai_drv = {
