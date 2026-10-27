@@ -983,6 +983,14 @@ static const struct panel_init_cmd ws_panel_10_1_b_init[] = {
 	{},
 };
 
+static const struct panel_init_cmd ws_panel_10_1_e_4lane_init[] = {
+	_INIT_DCS_CMD(0x11),
+	_INIT_DELAY_CMD(120),
+	_INIT_DCS_CMD(0x29),
+	_INIT_DELAY_CMD(50),
+	{},
+};
+
 static const struct panel_init_cmd ws_panel_8_8_a_init[] = {
 	_INIT_DCS_CMD(0x11),
 	_INIT_DELAY_CMD(120),
@@ -1974,11 +1982,11 @@ static const struct drm_display_mode ws_panel_12_3_a_4lane_mode = {
 };
 
 static const struct drm_display_mode ws_panel_10_1_a_mode = {
-	.clock = 70000,
+	.clock = 71000,
 	.hdisplay = 800,
 	.hsync_start = 800 + 40,
-	.hsync_end = 800 + 40 + 20,
-	.htotal = 800 + 40 + 20 + 20,
+	.hsync_end = 800 + 40 + 30,
+	.htotal = 800 + 40 + 30 + 20,
 	.vdisplay = 1280,
 	.vsync_start = 1280 + 20,
 	.vsync_end = 1280 + 20 + 20,
@@ -2013,6 +2021,20 @@ static const struct drm_display_mode ws_panel_10_1_b_mode = {
 	.vtotal = 1280 + 26 + 12 + 4,
 	.width_mm = 125,
 	.height_mm = 222,
+};
+
+static const struct drm_display_mode ws_panel_10_1_e_4lane_mode = {
+	.clock = 155000,
+	.hdisplay = 1200,
+	.hsync_start = 1200 + 28,
+	.hsync_end = 1200 + 28 + 10,
+	.htotal = 1200 + 28 + 10 + 30,
+	.vdisplay = 1920,
+	.vsync_start = 1920 + 80,
+	.vsync_end = 1920 + 80 + 4,
+	.vtotal = 1920 + 80 + 4 + 28,
+	.width_mm = 135,
+	.height_mm = 216,
 };
 
 static const struct drm_display_mode ws_panel_9_b_4lane_mode = {
@@ -2386,6 +2408,15 @@ static const struct ws_panel_desc ws_panel_10_1_inch_b_desc = {
 	.format = MIPI_DSI_FMT_RGB888,
 };
 
+static const struct ws_panel_desc ws_panel_10_1_inch_e_4lane_desc = {
+	.init = ws_panel_10_1_e_4lane_init,
+	.mode = &ws_panel_10_1_e_4lane_mode,
+	.mode_flags = MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_VIDEO |
+		      MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS,
+	.lanes = 4,
+	.format = MIPI_DSI_FMT_RGB888,
+};
+
 static const struct ws_panel_desc ws_panel_9_inch_b_4lane_desc = {
 	.init = ws_panel_10_1_b_4lane_init,
 	.mode = &ws_panel_9_b_4lane_mode,
@@ -2513,17 +2544,19 @@ static const struct ws_panel_desc ws_panel_3_4_inch_c_desc = {
 };
 
 static const struct of_device_id ws_panel_of_match[] = {
-	{ .compatible = "waveshare,12.3-dsi-touch-a,4lane",
+	{ .compatible = "waveshare,12.3-dsi-touch-a-4lane",
 	  &ws_panel_12_3_inch_a_4lane_desc },
 	{ .compatible = "waveshare,10.1-dsi-touch-a-4lane",
 	  &ws_panel_10_1_inch_a_4lane_desc },
 	{ .compatible = "waveshare,10.1-dsi-touch-a",
 	  &ws_panel_10_1_inch_a_desc },
-	{ .compatible = "waveshare,10.1-dsi-touch-b,4lane",
+	{ .compatible = "waveshare,10.1-dsi-touch-b-4lane",
 	  &ws_panel_10_1_inch_b_4lane_desc },
 	{ .compatible = "waveshare,10.1-dsi-touch-b",
 	  &ws_panel_10_1_inch_b_desc },
-	{ .compatible = "waveshare,9.0-dsi-touch-b,4lane",
+	{ .compatible = "waveshare,10.1-dsi-touch-e-4lane",
+	  &ws_panel_10_1_inch_e_4lane_desc },
+	{ .compatible = "waveshare,9.0-dsi-touch-b-4lane",
 	  &ws_panel_9_inch_b_4lane_desc },
 	{ .compatible = "waveshare,9.0-dsi-touch-b", &ws_panel_9_inch_b_desc },
 	{ .compatible = "waveshare,8.8-dsi-touch-a",

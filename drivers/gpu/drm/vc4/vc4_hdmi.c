@@ -3084,7 +3084,6 @@ static int vc4_hdmi_runtime_suspend(struct device *dev)
 	HDMI_WRITE(HDMI_RAM_PACKET_CONFIG, 0);
 	spin_unlock_irqrestore(&vc4_hdmi->hw_lock, flags);
 
-
 	clk_disable_unprepare(vc4_hdmi->audio_clock);
 	/* we no longer require a minimum clock rate */
 	clk_set_min_rate(vc4_hdmi->hsm_clock, 0);
@@ -3096,9 +3095,8 @@ static int vc4_hdmi_runtime_suspend(struct device *dev)
 static int vc4_hdmi_runtime_resume(struct device *dev)
 {
 	struct vc4_hdmi *vc4_hdmi = dev_get_drvdata(dev);
-	unsigned long flags;
+	unsigned long rate, flags;
 	u32 __maybe_unused value;
-	unsigned long rate;
 	int ret;
 
 	ret = clk_prepare_enable(vc4_hdmi->hsm_clock);
@@ -3145,8 +3143,7 @@ static int vc4_hdmi_runtime_resume(struct device *dev)
 #endif
 
 	spin_lock_irqsave(&vc4_hdmi->hw_lock, flags);
-	HDMI_WRITE(HDMI_RAM_PACKET_CONFIG,
-		   VC4_HDMI_RAM_PACKET_ENABLE);
+	HDMI_WRITE(HDMI_RAM_PACKET_CONFIG, VC4_HDMI_RAM_PACKET_ENABLE);
 	spin_unlock_irqrestore(&vc4_hdmi->hw_lock, flags);
 
 	return 0;
